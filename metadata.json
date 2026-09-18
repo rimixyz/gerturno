@@ -1,0 +1,6 @@
+{
+  "name": "Gerenciador de Turno RCC",
+  "description": "Sistema de gestão de turnos, presença, histórico e acompanhamento de militares da Polícia RCC do Habbo Hotel.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
