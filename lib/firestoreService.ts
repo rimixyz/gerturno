@@ -24,9 +24,16 @@ import {
   ImportSnapshot, 
   DetectedChange,
   ParsedMember,
-  ShiftType
+  ShiftType,
+  QualityPeriodFollowUp,
+  QualityCriterionStatus,
+  EvidenceType,
+  QualityEvidence,
+  ScoreChangeRecord,
+  OBLIGATORY_CRITERIA,
+  COMPLEMENTARY_CRITERIA
 } from './types';
-import { normalizeNick, generateMemberId } from './parser';
+import { normalizeNick, generateMemberId, getAlphanumericKey } from './parser';
 import { calculateMemberStatus } from './comparator';
 import { sanitizeForFirestore } from './sanitize';
 
@@ -284,6 +291,226 @@ export async function addMemberEvaluation(
 }
 
 /**
+ * Helper to compute default period identifier and label (e.g. "2026-09", "Setembro de 2026")
+ */
+export function getDefaultPeriod(date = new Date()): { periodId: string; periodLabel: string } {
+  const year = date.getFullYear();
+  const monthNames = [
+    'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+    'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+  ];
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const periodId = `${year}-${month}`;
+  const periodLabel = `${monthNames[date.getMonth()]} de ${year}`;
+  return { periodId, periodLabel };
+}
+
+/**
+ * Fetch Quality Follow-up for a member in a specific period
+ */
+export async function getMemberQualityFollowUp(
+  memberId: string, 
+  periodId?: string
+): Promise<QualityPeriodFollowUp | null> {
+  try {
+    const current = getDefaultPeriod();
+    const targetPeriodId = periodId || current.periodId;
+    const docRef = doc(db, 'members', memberId, 'quality', targetPeriodId);
+    const snap = await getDoc(docRef);
+
+    if (!snap.exists()) {
+      return null;
+    }
+
+    return { id: snap.id, ...(snap.data() as Omit<QualityPeriodFollowUp, 'id'>) };
+  } catch (err) {
+    console.error('Error fetching quality follow-up:', err);
+    return null;
+  }
+}
+
+/**
+ * Fetch or Initialize Quality Follow-up for a member in a period
+ */
+export async function getOrInitMemberQualityFollowUp(
+  memberId: string,
+  periodId?: string,
+  periodLabel?: string
+): Promise<QualityPeriodFollowUp> {
+  const current = getDefaultPeriod();
+  const targetPeriodId = periodId || current.periodId;
+  const targetPeriodLabel = periodLabel || current.periodLabel;
+
+  const existing = await getMemberQualityFollowUp(memberId, targetPeriodId);
+  if (existing) {
+    return existing;
+  }
+
+  // Initialize with defaults
+  const initialCriteriaStatus: Record<string, QualityCriterionStatus> = {};
+  OBLIGATORY_CRITERIA.forEach(c => {
+    initialCriteriaStatus[c.id] = 'nao_avaliado';
+  });
+  COMPLEMENTARY_CRITERIA.forEach(c => {
+    initialCriteriaStatus[c.id] = 'nao_observado';
+  });
+
+  const nowIso = new Date().toISOString();
+  const newFollowUp: QualityPeriodFollowUp = {
+    id: targetPeriodId,
+    memberId,
+    periodId: targetPeriodId,
+    periodLabel: targetPeriodLabel,
+    scoreHistory: [],
+    criteriaStatus: initialCriteriaStatus,
+    evidences: [],
+    createdAt: nowIso,
+    updatedAt: nowIso,
+  };
+
+  const docRef = doc(db, 'members', memberId, 'quality', targetPeriodId);
+  await setDoc(docRef, sanitizeForFirestore(newFollowUp));
+  return newFollowUp;
+}
+
+/**
+ * Get all available quality periods for a member
+ */
+export async function getAllQualityPeriodsForMember(memberId: string): Promise<QualityPeriodFollowUp[]> {
+  try {
+    const col = collection(db, 'members', memberId, 'quality');
+    const snap = await getDocs(col);
+    const list: QualityPeriodFollowUp[] = [];
+    snap.forEach(d => {
+      list.push({ id: d.id, ...(d.data() as Omit<QualityPeriodFollowUp, 'id'>) });
+    });
+    list.sort((a, b) => b.periodId.localeCompare(a.periodId));
+    return list;
+  } catch (err) {
+    console.error('Error fetching quality periods:', err);
+    return [];
+  }
+}
+
+/**
+ * Update single criterion status
+ */
+export async function updateCriterionStatus(
+  memberId: string,
+  periodId: string,
+  criterionId: string,
+  status: QualityCriterionStatus
+): Promise<void> {
+  const docRef = doc(db, 'members', memberId, 'quality', periodId);
+  const nowIso = new Date().toISOString();
+  await updateDoc(docRef, sanitizeForFirestore({
+    [`criteriaStatus.${criterionId}`]: status,
+    updatedAt: nowIso,
+  }));
+}
+
+/**
+ * Add an evidence for a criterion in this period.
+ * ALSO adds a corresponding timeline event to the member!
+ */
+export async function addQualityEvidence(
+  memberId: string,
+  periodId: string,
+  evidence: {
+    criterionId: string;
+    criterionName: string;
+    date: string;
+    type: EvidenceType;
+    description: string;
+    author: string;
+  }
+): Promise<QualityEvidence> {
+  const followUp = await getOrInitMemberQualityFollowUp(memberId, periodId);
+  const nowIso = new Date().toISOString();
+  const newEvidence: QualityEvidence = {
+    id: `ev_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+    criterionId: evidence.criterionId,
+    criterionName: evidence.criterionName,
+    date: evidence.date,
+    type: evidence.type,
+    description: evidence.description,
+    author: evidence.author,
+    createdAt: nowIso,
+  };
+
+  const updatedEvidences = [newEvidence, ...(followUp.evidences || [])];
+  const docRef = doc(db, 'members', memberId, 'quality', periodId);
+  await updateDoc(docRef, sanitizeForFirestore({
+    evidences: updatedEvidences,
+    updatedAt: nowIso,
+  }));
+
+  // Also add to member timeline
+  await addTimelineEvent(memberId, {
+    memberId,
+    date: evidence.date,
+    timestamp: nowIso,
+    title: `Evidência de Qualidade (${evidence.type}): ${evidence.criterionName}`,
+    description: `"${evidence.description}"`,
+    type: 'quality_evidence',
+    author: evidence.author,
+  });
+
+  return newEvidence;
+}
+
+/**
+ * Update Provisional Score for the member in this period.
+ * Maintains history and logs score change into member timeline.
+ */
+export async function updateProvisionalScore(
+  memberId: string,
+  periodId: string,
+  newScore: number,
+  author: string,
+  reason?: string
+): Promise<ScoreChangeRecord> {
+  const followUp = await getOrInitMemberQualityFollowUp(memberId, periodId);
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const monthShort = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'][now.getMonth()];
+  const dateFormatted = `${String(now.getDate()).padStart(2, '0')} ${monthShort} ${now.getFullYear()}`;
+  const prevScore = followUp.currentScore;
+
+  const record: ScoreChangeRecord = {
+    id: `score_${Date.now()}`,
+    previousScore: prevScore,
+    newScore,
+    date: dateFormatted,
+    timestamp: nowIso,
+    author,
+    reason: reason || undefined,
+  };
+
+  const updatedHistory = [...(followUp.scoreHistory || []), record];
+  const docRef = doc(db, 'members', memberId, 'quality', periodId);
+  await updateDoc(docRef, sanitizeForFirestore({
+    currentScore: newScore,
+    scoreHistory: updatedHistory,
+    updatedAt: nowIso,
+  }));
+
+  // Add to timeline
+  await addTimelineEvent(memberId, {
+    memberId,
+    date: dateFormatted,
+    timestamp: nowIso,
+    title: `Nota Provisória Alterada: ${prevScore !== undefined ? prevScore.toFixed(1) : '—'} → ${newScore.toFixed(1)}`,
+    description: reason ? `Motivo: ${reason}` : 'Ajuste de nota provisória no acompanhamento de qualidade.',
+    type: 'quality_score_change',
+    author,
+  });
+
+  return record;
+}
+
+
+/**
  * Commit Confirmed Import
  * Applies detected changes, updates existing members, creates new members,
  * marks dismissals, adds timeline records, and saves the snapshot.
@@ -323,19 +550,34 @@ export async function commitImportSnapshot(params: {
   // 1. Fetch current members
   const existingMembers = await getAllMembers();
   const existingMap = new Map<string, Member>();
+  const existingAlphaMap = new Map<string, Member>();
   for (const m of existingMembers) {
     existingMap.set(m.normalizedNick, m);
+    const alpha = getAlphanumericKey(m.nick);
+    if (alpha) {
+      const prev = existingAlphaMap.get(alpha);
+      // Prefer active profile if duplicates exist
+      if (!prev || (prev.isDismissed && !m.isDismissed)) {
+        existingAlphaMap.set(alpha, m);
+      }
+    }
   }
 
   const parsedMap = new Map<string, ParsedMember>();
+  const parsedAlphaMap = new Map<string, ParsedMember>();
   for (const p of parsedList) {
     parsedMap.set(normalizeNick(p.nick), p);
+    const alpha = getAlphanumericKey(p.nick);
+    if (alpha) {
+      parsedAlphaMap.set(alpha, p);
+    }
   }
 
   // 2. Process all parsed members
   for (const parsed of parsedList) {
     const norm = normalizeNick(parsed.nick);
-    const existing = existingMap.get(norm);
+    const alpha = getAlphanumericKey(parsed.nick);
+    const existing = existingMap.get(norm) || (alpha ? existingAlphaMap.get(alpha) : undefined);
     const memberId = existing ? existing.id : generateMemberId(parsed.nick);
 
     const calculatedStatus = calculateMemberStatus(
@@ -394,12 +636,18 @@ export async function commitImportSnapshot(params: {
   // 3. Process confirmed changes for existing members to write timeline entries
   for (const change of confirmedChanges) {
     const norm = normalizeNick(change.memberNick);
-    const existing = existingMap.get(norm);
+    const alpha = getAlphanumericKey(change.memberNick);
+    const existing = existingMap.get(norm) || (alpha ? existingAlphaMap.get(alpha) : undefined);
     const memberId = change.memberId || existing?.id || generateMemberId(change.memberNick);
 
     if (!memberId) continue;
 
     if (change.type === 'possible_dismissal') {
+      // Double check: if the member actually is in the incoming list (exact or fuzzy), DO NOT dismiss!
+      if (parsedMap.has(norm) || (alpha && parsedAlphaMap.has(alpha))) {
+        continue;
+      }
+
       // Confirmed dismissal
       if (existing) {
         const memberDocRef = doc(db, 'members', existing.id);
@@ -458,7 +706,14 @@ export async function commitImportSnapshot(params: {
     });
   }
 
-  // 4. Create Snapshot record
+  // 4. Clean up any ghost duplicates created by previous imports
+  try {
+    await cleanupDuplicateMembers();
+  } catch (cleanErr) {
+    console.warn('Warning during cleanupDuplicateMembers in commitImportSnapshot:', cleanErr);
+  }
+
+  // 5. Create Snapshot record
   const snapshotCol = collection(db, 'imports');
   const snapshotDoc = await addDoc(snapshotCol, sanitizeForFirestore({
     rawText,
@@ -567,7 +822,9 @@ export async function cleanupMalformedGeralMembers(): Promise<number> {
       const isMalformed = 
         m.nick.toLowerCase().startsWith('geral ') || 
         m.normalizedNick.toLowerCase().startsWith('geral_') ||
-        m.role.toLowerCase() === 'geral';
+        m.role.toLowerCase() === 'geral' ||
+        m.nick.toLowerCase().startsWith('majoritário ') ||
+        m.role.toLowerCase() === 'acionista';
 
       if (isMalformed) {
         await deleteDoc(doc(db, 'members', m.id));
@@ -579,3 +836,94 @@ export async function cleanupMalformedGeralMembers(): Promise<number> {
   }
   return count;
 }
+
+/**
+ * Automatically detects and cleans up duplicate/ghost member documents
+ * (e.g. m_lisboa marked as dismissed when m___lisboa is active, or punctuation variations).
+ */
+export async function cleanupDuplicateMembers(): Promise<number> {
+  let cleanedCount = 0;
+  try {
+    const allMembers = await getAllMembers();
+    const groups = new Map<string, Member[]>();
+
+    for (const m of allMembers) {
+      const alpha = getAlphanumericKey(m.nick);
+      if (!alpha) continue;
+      if (!groups.has(alpha)) {
+        groups.set(alpha, []);
+      }
+      groups.get(alpha)!.push(m);
+    }
+
+    for (const [, list] of groups.entries()) {
+      if (list.length <= 1) continue;
+
+      // We have duplicates!
+      const active = list.filter(m => !m.isDismissed && m.status !== 'DESLIGADO');
+      const dismissed = list.filter(m => m.isDismissed || m.status === 'DESLIGADO');
+
+      if (active.length > 0 && dismissed.length > 0) {
+        // The dismissed ones are ghost records caused by past imports or nick formatting changes!
+        for (const ghost of dismissed) {
+          await deleteDoc(doc(db, 'members', ghost.id));
+          cleanedCount++;
+        }
+      } else if (active.length > 1) {
+        // Both are active, keep the newest updated one and delete the other
+        list.sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+        const [, ...removeList] = list;
+        for (const rem of removeList) {
+          await deleteDoc(doc(db, 'members', rem.id));
+          cleanedCount++;
+        }
+      } else if (dismissed.length > 1) {
+        // Both are dismissed, keep one and delete duplicates
+        const [, ...removeList] = dismissed;
+        for (const rem of removeList) {
+          await deleteDoc(doc(db, 'members', rem.id));
+          cleanedCount++;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error cleaning duplicate members:', err);
+  }
+  return cleanedCount;
+}
+
+/**
+ * Reactivate a dismissed member
+ */
+export async function reactivateMember(memberId: string): Promise<void> {
+  const memberDocRef = doc(db, 'members', memberId);
+  const nowIso = new Date().toISOString();
+  await updateDoc(memberDocRef, sanitizeForFirestore({
+    isDismissed: false,
+    dismissedAt: null,
+    dismissalDetails: null,
+    status: 'ATIVO',
+    updatedAt: nowIso,
+  }));
+}
+
+/**
+ * Wipe all dismissed members from the database
+ */
+export async function clearAllDismissedMembers(): Promise<number> {
+  let count = 0;
+  try {
+    const allMembers = await getAllMembers();
+    for (const m of allMembers) {
+      if (m.isDismissed || m.status === 'DESLIGADO') {
+        await deleteDoc(doc(db, 'members', m.id));
+        count++;
+      }
+    }
+  } catch (err) {
+    console.error('Error clearing dismissed members:', err);
+    throw err;
+  }
+  return count;
+}
+

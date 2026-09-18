@@ -1,5 +1,5 @@
 import { Member, ParsedMember, DetectedChange, ShiftType, MemberStatus } from './types';
-import { normalizeNick, generateMemberId } from './parser';
+import { normalizeNick, generateMemberId, getAlphanumericKey } from './parser';
 
 /**
  * Calculates a member's qualification status based on the selected shift.
@@ -54,22 +54,33 @@ export function compareImportWithExisting(
 ): DetectedChange[] {
   const changes: DetectedChange[] = [];
 
-  // Map existing members by normalized nick
+  // Map existing members by normalized nick and by alphanumeric key
   const existingMap = new Map<string, Member>();
+  const existingAlphaMap = new Map<string, Member>();
   for (const m of existingMembers) {
     existingMap.set(m.normalizedNick, m);
+    const alpha = getAlphanumericKey(m.nick);
+    if (alpha) {
+      existingAlphaMap.set(alpha, m);
+    }
   }
 
-  // Map parsed members by normalized nick
+  // Map parsed members by normalized nick and by alphanumeric key
   const parsedMap = new Map<string, ParsedMember>();
+  const parsedAlphaMap = new Map<string, ParsedMember>();
   for (const p of parsedList) {
     parsedMap.set(normalizeNick(p.nick), p);
+    const alpha = getAlphanumericKey(p.nick);
+    if (alpha) {
+      parsedAlphaMap.set(alpha, p);
+    }
   }
 
   // 1. Check each incoming parsed member
   for (const parsed of parsedList) {
     const norm = normalizeNick(parsed.nick);
-    const existing = existingMap.get(norm);
+    const alpha = getAlphanumericKey(parsed.nick);
+    const existing = existingMap.get(norm) || (alpha ? existingAlphaMap.get(alpha) : undefined);
 
     if (!existing) {
       // New member entering the system
@@ -222,7 +233,10 @@ export function compareImportWithExisting(
     if (existing.isDismissed) continue; // already marked dismissed
 
     const norm = existing.normalizedNick;
-    if (!parsedMap.has(norm)) {
+    const alpha = getAlphanumericKey(existing.nick);
+    const inParsed = parsedMap.has(norm) || (alpha ? parsedAlphaMap.has(alpha) : false);
+
+    if (!inParsed) {
       changes.push({
         memberNick: existing.nick,
         memberId: existing.id,

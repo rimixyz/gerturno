@@ -12,24 +12,25 @@ import {
   getMemberTimeline, 
   getMemberAttendanceHistory, 
   getMemberNotes, 
-  getMemberEvaluations,
   getAppSettings,
   saveAttendance,
   addMemberNote,
-  addMemberEvaluation,
   updateMember,
   addTimelineEvent,
-  deleteMember
+  deleteMember,
+  getMemberQualityFollowUp
 } from '@/lib/firestoreService';
 import { 
   Member, 
   TimelineEvent, 
   AttendanceRecord, 
   NoteRecord, 
-  EvaluationRecord, 
   AppSettings,
-  AttendanceStatus 
+  AttendanceStatus,
+  QualityPeriodFollowUp
 } from '@/lib/types';
+import { QualitySummaryCard } from '@/components/QualitySummaryCard';
+import { QualityFollowUpView } from '@/components/QualityFollowUpView';
 import { 
   ArrowLeft, 
   Calendar, 
@@ -61,47 +62,34 @@ export default function MemberProfilePage() {
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [attendanceList, setAttendanceList] = useState<AttendanceRecord[]>([]);
   const [notes, setNotes] = useState<NoteRecord[]>([]);
-  const [evaluations, setEvaluations] = useState<EvaluationRecord[]>([]);
+  const [qualityFollowUp, setQualityFollowUp] = useState<QualityPeriodFollowUp | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Tabs: 'visao-geral' | 'presenca' | 'avaliacoes' | 'anotacoes' | 'historico'
-  const [activeTab, setActiveTab] = useState<'visao-geral' | 'presenca' | 'avaliacoes' | 'anotacoes' | 'historico'>('visao-geral');
+  // Tabs: 'visao-geral' | 'qualidade' | 'presenca' | 'anotacoes' | 'historico'
+  const [activeTab, setActiveTab] = useState<'visao-geral' | 'qualidade' | 'presenca' | 'anotacoes' | 'historico'>('visao-geral');
 
   // Modals state
   const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
   const [noteModalOpen, setNoteModalOpen] = useState(false);
   const [scheduleModalOpen, setScheduleModalOpen] = useState(false);
 
-  // Quick evaluation state
-  const [showEvaluationForm, setShowEvaluationForm] = useState(false);
-  const [evalScores, setEvalScores] = useState<Record<string, number>>({
-    desempenho: 5,
-    lideranca: 5,
-    comunicacao: 5,
-    iniciativa: 5,
-    presenca: 5,
-    desenvolvimento: 5,
-  });
-  const [evalObservation, setEvalObservation] = useState('');
-  const [submittingEval, setSubmittingEval] = useState(false);
-
   const loadData = React.useCallback(async () => {
     if (!memberId) return;
     try {
-      const [m, setts, tl, att, nts, evs] = await Promise.all([
+      const [m, setts, tl, att, nts, qf] = await Promise.all([
         getMemberById(memberId),
         getAppSettings(),
         getMemberTimeline(memberId),
         getMemberAttendanceHistory(memberId),
         getMemberNotes(memberId),
-        getMemberEvaluations(memberId),
+        getMemberQualityFollowUp(memberId),
       ]);
       setMember(m);
       setSettings(setts);
       setTimeline(tl);
       setAttendanceList(att);
       setNotes(nts);
-      setEvaluations(evs);
+      setQualityFollowUp(qf);
     } catch (err) {
       console.error('Error fetching member profile:', err);
     } finally {
@@ -187,28 +175,6 @@ export default function MemberProfilePage() {
         console.error('Error deleting member:', err);
         alert('Erro ao excluir militar.');
       }
-    }
-  };
-
-  const handleSaveEvaluation = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSubmittingEval(true);
-    try {
-      const todayStr = new Date().toISOString().split('T')[0];
-      await addMemberEvaluation(member.id, {
-        memberId: member.id,
-        date: todayStr,
-        criteria: evalScores,
-        observation: evalObservation.trim() || undefined,
-        author: settings?.adminDisplayName || 'Oficial de Turno',
-      });
-      setShowEvaluationForm(false);
-      setEvalObservation('');
-      loadData();
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setSubmittingEval(false);
     }
   };
 
@@ -400,16 +366,29 @@ export default function MemberProfilePage() {
         {/* Navigation Tabs */}
         <div className="flex border-b border-[#27272A] mb-6 overflow-x-auto">
           {[
-            { id: 'visao-geral', label: 'Visão Geral' },
-            { id: 'presenca', label: `Presença (${attendanceList.length})` },
-            { id: 'avaliacoes', label: `Avaliações (${evaluations.length})` },
-            { id: 'anotacoes', label: `Anotações (${notes.length})` },
-            { id: 'historico', label: `Histórico / Timeline (${timeline.length})` },
+            { id: 'visao-geral', label: <span>Visão Geral</span> },
+            { 
+              id: 'qualidade', 
+              label: (
+                <span className="flex items-center gap-1.5">
+                  <Award className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Qualidade</span>
+                  {qualityFollowUp?.currentScore !== undefined && (
+                    <span className="bg-emerald-500/10 text-emerald-400 font-mono text-[10px] px-1.5 py-0.5 rounded border border-emerald-500/20">
+                      {qualityFollowUp.currentScore.toFixed(1)}
+                    </span>
+                  )}
+                </span>
+              )
+            },
+            { id: 'presenca', label: <span>Presença ({attendanceList.length})</span> },
+            { id: 'anotacoes', label: <span>Anotações ({notes.length})</span> },
+            { id: 'historico', label: <span>Histórico / Timeline ({timeline.length})</span> },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className={`px-5 py-3 text-xs font-medium whitespace-nowrap transition-all border-b-2 ${
+              className={`px-5 py-3 text-xs font-medium whitespace-nowrap transition-all border-b-2 flex items-center gap-1.5 ${
                 activeTab === tab.id
                   ? 'border-emerald-400 text-[#FAFAFA]'
                   : 'border-transparent text-[#A1A1AA] hover:text-[#FAFAFA]'
@@ -420,9 +399,27 @@ export default function MemberProfilePage() {
           ))}
         </div>
 
+        {/* TAB QUALIDADE / ACOMPANHAMENTO */}
+        {activeTab === 'qualidade' && (
+          <QualityFollowUpView
+            member={member}
+            currentAdminName={settings?.adminDisplayName || 'Diretoria de Turno'}
+            timeline={timeline}
+            attendanceList={attendanceList}
+            notes={notes}
+            onRefreshParent={loadData}
+          />
+        )}
+
         {/* TAB 1: VISÃO GERAL */}
         {activeTab === 'visao-geral' && (
           <div className="space-y-6">
+            {/* Quick Quality Summary Card */}
+            <QualitySummaryCard
+              followUp={qualityFollowUp}
+              onOpenFollowUp={() => setActiveTab('qualidade')}
+            />
+
             {/* Tasks section */}
             <div className="bg-[#111113] border border-[#27272A] rounded-xl p-5">
               <h3 className="font-semibold text-sm text-[#FAFAFA] mb-3 flex items-center gap-2">
@@ -572,125 +569,7 @@ export default function MemberProfilePage() {
           </div>
         )}
 
-        {/* TAB 3: AVALIAÇÕES DE QUALIDADE */}
-        {activeTab === 'avaliacoes' && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <span className="text-xs text-[#A1A1AA]">
-                Critérios operacionais dinâmicos para acompanhar desenvolvimento e qualidade de atuação.
-              </span>
-              <button
-                onClick={() => setShowEvaluationForm(!showEvaluationForm)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
-              >
-                <Plus className="w-3.5 h-3.5" />
-                <span>{showEvaluationForm ? 'Fechar Formulário' : 'Nova Avaliação'}</span>
-              </button>
-            </div>
-
-            {/* Dynamic Evaluation Form */}
-            {showEvaluationForm && (
-              <form onSubmit={handleSaveEvaluation} className="bg-[#111113] border border-[#27272A] rounded-xl p-5 space-y-4 animate-in fade-in">
-                <h4 className="font-semibold text-sm text-white">Registrar Avaliação de Atuação</h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {[
-                    { id: 'desempenho', label: 'Desempenho Geral' },
-                    { id: 'lideranca', label: 'Liderança' },
-                    { id: 'comunicacao', label: 'Comunicação' },
-                    { id: 'iniciativa', label: 'Iniciativa' },
-                    { id: 'presenca', label: 'Presença & Pontualidade' },
-                    { id: 'desenvolvimento', label: 'Desenvolvimento de Subalternos' },
-                  ].map((crit) => (
-                    <div key={crit.id} className="p-3 bg-[#09090B] border border-[#27272A] rounded-lg">
-                      <div className="flex items-center justify-between text-xs mb-2">
-                        <span className="font-medium text-[#E4E4E7]">{crit.label}</span>
-                        <span className="font-bold text-emerald-400 font-mono">{evalScores[crit.id] || 5}/5</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="1"
-                        max="5"
-                        value={evalScores[crit.id] || 5}
-                        onChange={(e) => setEvalScores({ ...evalScores, [crit.id]: parseInt(e.target.value, 10) })}
-                        className="w-full accent-emerald-500 cursor-pointer"
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                <div>
-                  <label className="block text-xs font-medium text-[#A1A1AA] mb-1.5">
-                    Observações e Parecer da Avaliação
-                  </label>
-                  <textarea
-                    rows={3}
-                    value={evalObservation}
-                    onChange={(e) => setEvalObservation(e.target.value)}
-                    placeholder="Comente sobre o desempenho, pontos fortes e pontos a evoluir..."
-                    className="w-full bg-[#09090B] border border-[#27272A] rounded-lg p-3 text-xs text-[#FAFAFA] placeholder:text-[#52525B] focus:outline-hidden focus:border-emerald-500/50 resize-none"
-                  />
-                </div>
-
-                <div className="flex justify-end gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowEvaluationForm(false)}
-                    className="px-4 py-2 text-xs text-[#A1A1AA] hover:text-white rounded-lg"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={submittingEval}
-                    className="px-5 py-2 text-xs font-medium bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg disabled:opacity-50"
-                  >
-                    {submittingEval ? 'Gravando...' : 'Salvar Avaliação'}
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* List of evaluations */}
-            <div className="space-y-3">
-              {evaluations.length === 0 ? (
-                <div className="bg-[#111113] border border-[#27272A] rounded-xl p-12 text-center text-xs text-[#71717A]">
-                  Nenhuma avaliação registrada ainda.
-                </div>
-              ) : (
-                evaluations.map((ev) => (
-                  <div key={ev.id} className="bg-[#111113] border border-[#27272A] rounded-xl p-5">
-                    <div className="flex items-center justify-between pb-3 border-b border-[#27272A] mb-3">
-                      <div>
-                        <span className="font-semibold text-xs text-white">
-                          Avaliação de {ev.date ? format(new Date(ev.date + 'T12:00:00'), "dd 'de' MMMM 'de' yyyy", { locale: ptBR }) : ev.date}
-                        </span>
-                        <span className="text-[11px] text-[#71717A] ml-2">Avaliador: {ev.author}</span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 mb-3">
-                      {Object.entries(ev.criteria || {}).map(([key, val]) => (
-                        <div key={key} className="p-2 bg-[#09090B] border border-[#27272A] rounded text-xs flex items-center justify-between">
-                          <span className="text-[#A1A1AA] capitalize">{key}</span>
-                          <span className="font-bold text-emerald-400 font-mono">{String(val)}/5</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    {ev.observation && (
-                      <p className="text-xs text-[#D4D4D8] italic bg-[#09090B] p-3 rounded border border-[#27272A]">
-                        &quot;{ev.observation}&quot;
-                      </p>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* TAB 4: ANOTAÇÕES */}
+        {/* TAB: ANOTAÇÕES */}
         {activeTab === 'anotacoes' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">

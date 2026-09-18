@@ -15,7 +15,8 @@ import {
   LogIn,
   Clock,
   Menu,
-  X
+  X,
+  Award
 } from 'lucide-react';
 import { useAuth } from '@/lib/AuthContext';
 import { ShiftType } from '@/lib/types';
@@ -42,6 +43,12 @@ export function Sidebar({ currentShift = 'Manhã' }: SidebarProps) {
       href: '/militares',
       icon: Users,
       active: pathname.startsWith('/militares') && !pathname.includes('/desligados'),
+    },
+    {
+      name: 'Qualidade',
+      href: '/qualidade',
+      icon: Award,
+      active: pathname.startsWith('/qualidade'),
     },
     {
       name: 'Histórico',

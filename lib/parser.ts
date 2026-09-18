@@ -9,11 +9,19 @@ export function normalizeNick(nick: string): string {
 }
 
 /**
+ * Returns an alphanumeric key for fuzzy comparison across Habbo symbols (e.g. "-:Lisboa" -> "lisboa", "carlosobama10." -> "carlosobama10").
+ */
+export function getAlphanumericKey(nick: string): string {
+  return nick.toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/**
  * Generates a stable internal member id from a normalized nick or random seed if needed.
+ * Uses alphanumeric key so punctuation variations (e.g. Lisboa vs -:Lisboa) always map to the same id.
  */
 export function generateMemberId(nick: string): string {
-  const clean = nick.trim().toLowerCase().replace(/[^a-z0-9]/g, '_');
-  return `m_${clean}`;
+  const clean = getAlphanumericKey(nick);
+  return clean ? `m_${clean}` : `m_${Date.now()}`;
 }
 
 const KNOWN_ROLES = [
@@ -36,6 +44,9 @@ const KNOWN_ROLES = [
   'Supervisor Geral',
   'Corregedor-Geral',
   'Corregedor Geral',
+  'Acionista Majoritário',
+  'Acionista-Majoritário',
+  'Acionista',
   'General',
   'Marechal',
   'Chanceler',
