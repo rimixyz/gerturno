@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { Sidebar } from '@/components/Sidebar';
 import { getAllMembers, getAppSettings, deleteMember, cleanupMalformedGeralMembers } from '@/lib/firestoreService';
 import { Member, AppSettings, ShiftType, MemberStatus } from '@/lib/types';
+import { MofoBadge } from '@/components/MofoBadge';
+import { calculateMofo } from '@/lib/mofoCalculator';
 import { 
   Users, 
   Search, 
@@ -17,7 +19,8 @@ import {
   ArrowUpDown,
   Trash2,
   AlertTriangle,
-  RefreshCw
+  RefreshCw,
+  Hourglass
 } from 'lucide-react';
 
 export default function MilitaresPage() {
@@ -33,6 +36,7 @@ export default function MilitaresPage() {
   const [statusFilter, setStatusFilter] = useState<string>('TODOS');
   const [shiftFilter, setShiftFilter] = useState<string>('TODOS');
   const [taskFilter, setTaskFilter] = useState<string>('');
+  const [promotionFilter, setPromotionFilter] = useState<string>('TODOS');
 
   const loadData = async () => {
     try {
@@ -137,6 +141,20 @@ export default function MilitaresPage() {
       return m.isDismissed || m.status === 'DESLIGADO';
     }
 
+    // Promotion / Mofo filter
+    if (promotionFilter !== 'TODOS') {
+      const mofo = calculateMofo(m.role, m.lastPromotionDate);
+      if (promotionFilter === 'APTOS') {
+        if (!mofo.isEligibleForPromotion) return false;
+      } else if (promotionFilter === 'PENDENTES') {
+        if (mofo.isEligibleForPromotion || !mofo.hasPromotionDate || mofo.isMaxRole) return false;
+      } else if (promotionFilter === 'CARGO_MAXIMO') {
+        if (!mofo.isMaxRole) return false;
+      } else if (promotionFilter === 'SEM_DATA') {
+        if (mofo.hasPromotionDate) return false;
+      }
+    }
+
     return true;
   });
 
@@ -202,7 +220,7 @@ export default function MilitaresPage() {
 
         {/* Filter Controls Bar */}
         <div className="bg-[#111113] border border-[#27272A] rounded-xl p-4 mb-6 space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
             {/* Search Input */}
             <div className="relative sm:col-span-2">
               <Search className="w-4 h-4 text-[#71717A] absolute left-3 top-1/2 -translate-y-1/2" />
@@ -257,6 +275,21 @@ export default function MilitaresPage() {
                 ))}
               </select>
             </div>
+
+            {/* Promotion / Mofo Filter */}
+            <div>
+              <select
+                value={promotionFilter}
+                onChange={(e) => setPromotionFilter(e.target.value)}
+                className="w-full bg-[#09090B] border border-[#27272A] rounded-lg px-3 py-2 text-xs text-[#FAFAFA] focus:outline-hidden focus:border-emerald-500/50"
+              >
+                <option value="TODOS">Mofo: Todos</option>
+                <option value="APTOS">Aptos p/ Promoção</option>
+                <option value="PENDENTES">Tempo Pendente</option>
+                <option value="CARGO_MAXIMO">Máximo (Chanceler)</option>
+                <option value="SEM_DATA">Sem Data de Promoção</option>
+              </select>
+            </div>
           </div>
         </div>
 
@@ -308,7 +341,7 @@ export default function MilitaresPage() {
                       </div>
                     </div>
 
-                    {/* Middle: Shifts & Tasks */}
+                    {/* Middle: Shifts, Tasks & Mofo Badge */}
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="flex items-center gap-1">
                         {member.shifts.map((s) => (
@@ -320,6 +353,8 @@ export default function MilitaresPage() {
                           </span>
                         ))}
                       </div>
+
+                      <MofoBadge role={member.role} lastPromotionDate={member.lastPromotionDate} compact={true} />
 
                       {member.tasks && member.tasks.length > 0 && (
                         <div className="flex items-center gap-1">

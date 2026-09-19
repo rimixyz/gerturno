@@ -31,6 +31,8 @@ import {
 } from '@/lib/types';
 import { QualitySummaryCard } from '@/components/QualitySummaryCard';
 import { QualityFollowUpView } from '@/components/QualityFollowUpView';
+import { MofoBadge } from '@/components/MofoBadge';
+import { calculateMofo } from '@/lib/mofoCalculator';
 import { 
   ArrowLeft, 
   Calendar, 
@@ -47,7 +49,9 @@ import {
   AlertCircle,
   Clock3,
   Edit3,
-  Trash2
+  Trash2,
+  Hourglass,
+  ArrowUpRight
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -341,6 +345,84 @@ export default function MemberProfilePage() {
             </div>
           </div>
 
+          {/* Destaque de Tempo no Cargo ("Tempo de Mofo") e Progressão */}
+          {(() => {
+            const mofo = calculateMofo(member.role, member.lastPromotionDate);
+            return (
+              <div className="mt-4 pt-4 border-t border-[#27272A] bg-[#09090B]/60 p-3 rounded-lg border border-[#27272A]">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className={`p-2 rounded-lg ${
+                      mofo.isMaxRole
+                        ? 'bg-purple-500/10 text-purple-400 border border-purple-500/25'
+                        : mofo.isEligibleForPromotion 
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' 
+                          : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                    }`}>
+                      <Hourglass className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-semibold text-[#FAFAFA]">
+                          Tempo no Cargo:
+                        </span>
+                        <span className={`text-xs font-bold ${
+                          mofo.isMaxRole
+                            ? 'text-purple-300'
+                            : mofo.isEligibleForPromotion ? 'text-emerald-400' : 'text-amber-400'
+                        }`}>
+                          {mofo.hasPromotionDate ? `${mofo.daysInRole} ${mofo.daysInRole === 1 ? 'dia' : 'dias'} no cargo` : 'Data não informada'}
+                        </span>
+                        {mofo.hasPromotionDate && (
+                          <span className="text-[11px] text-[#71717A]">
+                            (desde {member.lastPromotionDate})
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-[#A1A1AA] mt-0.5">
+                        {mofo.isMaxRole ? (
+                          <span className="text-purple-300/90 font-medium">
+                            Chanceler é o cargo máximo da hierarquia executiva. Não possui promoção subsequente.
+                          </span>
+                        ) : mofo.requiredDays !== null ? (
+                          <span>
+                            Exigência mínima: <strong>{mofo.requiredDays} {mofo.requiredDays === 1 ? 'dia' : 'dias'}</strong> de serviços prestados para ascender a <strong>{mofo.nextRole}</strong>.
+                          </span>
+                        ) : (
+                          <span>Sem regra de promoção cadastrada para esta patente.</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="shrink-0 flex items-center gap-2">
+                    <MofoBadge role={member.role} lastPromotionDate={member.lastPromotionDate} />
+                  </div>
+                </div>
+
+                {/* Progress bar when rule exists and not max role */}
+                {!mofo.isMaxRole && mofo.hasPromotionDate && mofo.requiredDays !== null && mofo.requiredDays > 0 && (
+                  <div className="mt-3 pt-2.5 border-t border-[#18181B]">
+                    <div className="flex items-center justify-between text-[10px] text-[#A1A1AA] mb-1">
+                      <span>Progresso para promoção ({member.role} → {mofo.nextRole})</span>
+                      <span className="font-semibold text-[#FAFAFA]">
+                        {Math.min(100, Math.round((mofo.daysInRole / mofo.requiredDays) * 100))}% ({mofo.daysInRole}/{mofo.requiredDays} dias)
+                      </span>
+                    </div>
+                    <div className="w-full h-1.5 bg-[#18181B] rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all rounded-full ${
+                          mofo.isEligibleForPromotion ? 'bg-emerald-400' : 'bg-amber-400'
+                        }`}
+                        style={{ width: `${Math.min(100, (mofo.daysInRole / mofo.requiredDays) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+
           {/* ADV or Leave warnings */}
           {(member.adv !== undefined && member.adv > 0 || member.isOnLeave) && (
             <div className="mt-4 pt-4 border-t border-[#27272A] flex flex-wrap gap-3 text-xs">
@@ -400,19 +482,20 @@ export default function MemberProfilePage() {
         </div>
 
         {/* TAB QUALIDADE / ACOMPANHAMENTO */}
-        {activeTab === 'qualidade' && (
+        <div className={activeTab === 'qualidade' ? 'block' : 'hidden'}>
           <QualityFollowUpView
             member={member}
             currentAdminName={settings?.adminDisplayName || 'Diretoria de Turno'}
             timeline={timeline}
             attendanceList={attendanceList}
             notes={notes}
+            initialFollowUp={qualityFollowUp}
             onRefreshParent={loadData}
           />
-        )}
+        </div>
 
         {/* TAB 1: VISÃO GERAL */}
-        {activeTab === 'visao-geral' && (
+        <div className={activeTab === 'visao-geral' ? 'block' : 'hidden'}>
           <div className="space-y-6">
             {/* Quick Quality Summary Card */}
             <QualitySummaryCard
@@ -451,7 +534,7 @@ export default function MemberProfilePage() {
                     <FileText className="w-4 h-4 text-emerald-400" />
                     Últimas Anotações
                   </h3>
-                  <button onClick={() => setNoteModalOpen(true)} className="text-xs text-emerald-400 hover:underline">
+                  <button onClick={() => setNoteModalOpen(true)} className="text-xs text-emerald-400 hover:underline cursor-pointer">
                     Adicionar
                   </button>
                 </div>
@@ -479,7 +562,7 @@ export default function MemberProfilePage() {
                     <History className="w-4 h-4 text-emerald-400" />
                     Últimos Eventos do Militar
                   </h3>
-                  <button onClick={() => setActiveTab('historico')} className="text-xs text-emerald-400 hover:underline">
+                  <button onClick={() => setActiveTab('historico')} className="text-xs text-emerald-400 hover:underline cursor-pointer">
                     Ver todos
                   </button>
                 </div>
@@ -501,10 +584,10 @@ export default function MemberProfilePage() {
               </div>
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB 2: PRESENÇA */}
-        {activeTab === 'presenca' && (
+        <div className={activeTab === 'presenca' ? 'block' : 'hidden'}>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs text-[#A1A1AA]">
@@ -512,7 +595,7 @@ export default function MemberProfilePage() {
               </span>
               <button
                 onClick={() => setAttendanceModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Registrar Chamada</span>
@@ -567,10 +650,10 @@ export default function MemberProfilePage() {
               )}
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB: ANOTAÇÕES */}
-        {activeTab === 'anotacoes' && (
+        <div className={activeTab === 'anotacoes' ? 'block' : 'hidden'}>
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <span className="text-xs text-[#A1A1AA]">
@@ -578,7 +661,7 @@ export default function MemberProfilePage() {
               </span>
               <button
                 onClick={() => setNoteModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors"
+                className="inline-flex items-center gap-1.5 px-3 py-2 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded-lg transition-colors cursor-pointer"
               >
                 <Plus className="w-3.5 h-3.5" />
                 <span>Nova Anotação</span>
@@ -620,10 +703,10 @@ export default function MemberProfilePage() {
               )}
             </div>
           </div>
-        )}
+        </div>
 
         {/* TAB 5: HISTÓRICO / TIMELINE */}
-        {activeTab === 'historico' && (
+        <div className={activeTab === 'historico' ? 'block' : 'hidden'}>
           <div className="space-y-4">
             <div className="text-xs text-[#A1A1AA] mb-2">
               Linha do tempo permanente de promoções, cargos, tarefas, turnos e licenças. Eventos nunca são sobrescritos.
@@ -654,7 +737,7 @@ export default function MemberProfilePage() {
               )}
             </div>
           </div>
-        )}
+        </div>
 
         {/* Modals */}
         <AttendanceModal

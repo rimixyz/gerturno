@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { 
   Member, 
   QualityPeriodFollowUp, 
@@ -51,6 +51,7 @@ interface QualityFollowUpViewProps {
   timeline: TimelineEvent[];
   attendanceList: AttendanceRecord[];
   notes: NoteRecord[];
+  initialFollowUp?: QualityPeriodFollowUp | null;
   onRefreshParent?: () => void;
 }
 
@@ -60,12 +61,14 @@ export function QualityFollowUpView({
   timeline,
   attendanceList,
   notes,
+  initialFollowUp,
   onRefreshParent,
 }: QualityFollowUpViewProps) {
-  const [loading, setLoading] = useState(true);
-  const [followUp, setFollowUp] = useState<QualityPeriodFollowUp | null>(null);
-  const [allPeriods, setAllPeriods] = useState<QualityPeriodFollowUp[]>([]);
+  const [loading, setLoading] = useState(!initialFollowUp);
+  const [followUp, setFollowUp] = useState<QualityPeriodFollowUp | null>(initialFollowUp || null);
+  const [allPeriods, setAllPeriods] = useState<QualityPeriodFollowUp[]>(initialFollowUp ? [initialFollowUp] : []);
   const [selectedPeriodId, setSelectedPeriodId] = useState<string>(() => {
+    if (initialFollowUp?.periodId) return initialFollowUp.periodId;
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
   });
@@ -107,8 +110,25 @@ export function QualityFollowUpView({
   }, [member.id, selectedPeriodId]);
 
   useEffect(() => {
-    loadFollowUpData();
-  }, [loadFollowUpData]);
+    if (initialFollowUp) {
+      setFollowUp(initialFollowUp);
+      setSelectedPeriodId(initialFollowUp.periodId);
+      setAllPeriods(prev => {
+        if (!prev.some(p => p.periodId === initialFollowUp.periodId)) {
+          return [initialFollowUp, ...prev];
+        }
+        return prev;
+      });
+      setLoading(false);
+    }
+  }, [initialFollowUp]);
+
+  useEffect(() => {
+    // Only fetch if initialFollowUp was not supplied for this member
+    if (!initialFollowUp) {
+      loadFollowUpData();
+    }
+  }, [member.id, initialFollowUp, loadFollowUpData]);
 
   const handlePeriodChange = async (newPid: string) => {
     setSelectedPeriodId(newPid);
@@ -226,13 +246,20 @@ export function QualityFollowUpView({
   };
 
   // Pre-calculate system signals
-  const attendancesThisMonth = attendanceList.filter(a => {
-    if (!followUp) return true;
-    return a.date.startsWith(followUp.periodId);
-  });
-  const presences = attendancesThisMonth.filter(a => a.status === 'Presente').length;
-  const absences = attendancesThisMonth.filter(a => a.status === 'Ausente').length;
-  const notesCount = notes.length;
+  const { presences, absences, notesCount } = useMemo(() => {
+    const periodId = followUp?.periodId;
+    const attendancesThisMonth = attendanceList.filter(a => {
+      if (!periodId) return true;
+      return a.date && a.date.startsWith(periodId);
+    });
+    const p = attendancesThisMonth.filter(a => a.status === 'Presente').length;
+    const abs = attendancesThisMonth.filter(a => a.status === 'Ausente').length;
+    return {
+      presences: p,
+      absences: abs,
+      notesCount: notes.length,
+    };
+  }, [attendanceList, followUp?.periodId, notes.length]);
 
   if (loading && !followUp) {
     return (

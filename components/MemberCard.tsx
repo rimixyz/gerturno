@@ -7,6 +7,7 @@ import {
   AttendanceRecord, 
   AttendanceStatus 
 } from '@/lib/types';
+import { MofoBadge } from '@/components/MofoBadge';
 import { 
   CheckCircle2, 
   XCircle, 
@@ -17,7 +18,8 @@ import {
   ChevronRight, 
   Calendar,
   Tag,
-  Shield
+  Shield,
+  Hourglass
 } from 'lucide-react';
 
 interface MemberCardProps {
@@ -110,25 +112,36 @@ export function MemberCard({ member, attendance, onQuickAttendance }: MemberCard
         </div>
 
         {/* Promotion and Schedule Meta */}
-        <div className="grid grid-cols-2 gap-2 text-[11px] text-[#A1A1AA] py-3 border-y border-[#1E1E22] my-3">
-          <div>
-            <div className="text-[10px] uppercase font-medium text-[#71717A] tracking-wider mb-0.5 flex items-center gap-1">
-              <Calendar className="w-3 h-3 text-[#71717A]" />
-              Última Promoção
+        <div className="py-3 border-y border-[#1E1E22] my-3 space-y-2">
+          <div className="grid grid-cols-2 gap-2 text-[11px] text-[#A1A1AA]">
+            <div>
+              <div className="text-[10px] uppercase font-medium text-[#71717A] tracking-wider mb-0.5 flex items-center gap-1">
+                <Calendar className="w-3 h-3 text-[#71717A]" />
+                Última Promoção
+              </div>
+              <div className="font-medium text-[#E4E4E7] truncate">
+                {member.lastPromotionDate || 'Não informada'}
+              </div>
             </div>
-            <div className="font-medium text-[#E4E4E7] truncate">
-              {member.lastPromotionDate || 'Não informada'}
+
+            <div>
+              <div className="text-[10px] uppercase font-medium text-[#71717A] tracking-wider mb-0.5 flex items-center gap-1">
+                <Clock className="w-3 h-3 text-[#71717A]" />
+                Horário Habitual
+              </div>
+              <div className="font-medium text-[#E4E4E7] truncate">
+                {member.customSchedule || member.shifts.join('/') || 'Padrão do turno'}
+              </div>
             </div>
           </div>
 
-          <div>
-            <div className="text-[10px] uppercase font-medium text-[#71717A] tracking-wider mb-0.5 flex items-center gap-1">
-              <Clock className="w-3 h-3 text-[#71717A]" />
-              Horário Habitual
-            </div>
-            <div className="font-medium text-[#E4E4E7] truncate">
-              {member.customSchedule || member.shifts.join('/') || 'Padrão do turno'}
-            </div>
+          {/* Tempo de Mofo / Aptidão para Promoção */}
+          <div className="pt-2 border-t border-[#18181B] flex items-center justify-between">
+            <span className="text-[10px] uppercase font-medium text-[#71717A] tracking-wider flex items-center gap-1">
+              <Hourglass className="w-3 h-3 text-emerald-400/80" />
+              Tempo no Cargo
+            </span>
+            <MofoBadge role={member.role} lastPromotionDate={member.lastPromotionDate} compact={true} />
           </div>
         </div>
 
